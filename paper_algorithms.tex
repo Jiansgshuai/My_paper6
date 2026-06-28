@@ -1,0 +1,164 @@
+% ======================================================================
+% Supplementary Algorithms for the Paper
+% Include this in your main paper or use as reference
+% ======================================================================
+
+% Add these algorithm blocks to your paper where appropriate
+
+% ---------- Algorithm 1: SVO-Based Background Removal ----------
+\begin{algorithm}[H]
+\caption{SVO-Based Incremental Background Removal}
+\label{alg:background_removal}
+\begin{algorithmic}[1]
+\REQUIRE Point cloud sequence $\{\mathcal{P}_1, \ldots, \mathcal{P}_T\}$, background threshold $\theta_{\text{bg}}$
+\ENSURE Foreground point clouds $\{\mathcal{F}_1, \ldots, \mathcal{F}_T\}$
+\STATE Initialize octree $\mathcal{O}$ with scene bounds
+\FOR{$t = 1$ to $T$}
+    \STATE $\mathcal{P}_t^{\text{filtered}} \leftarrow \text{StatisticalOutlierRemoval}(\mathcal{P}_t)$
+    \FOR{each point $\mathbf{p} \in \mathcal{P}_t^{\text{filtered}}$}
+        \STATE Insert $\mathbf{p}$ into $\mathcal{O}$
+        \STATE Update visit count of leaf node containing $\mathbf{p}$
+    \ENDFOR
+    \IF{$t \geq \theta_{\text{bg}}$}
+        \STATE Mark background nodes: $n_{\text{visit}} \geq \theta_{\text{bg}}$
+    \ENDIF
+    \STATE $\mathcal{F}_t \leftarrow \emptyset$
+    \FOR{each point $\mathbf{p} \in \mathcal{P}_t^{\text{filtered}}$}
+        \STATE $\text{node} \leftarrow \text{FindLeafNode}(\mathcal{O}, \mathbf{p})$
+        \IF{$\neg \text{node}.f_{\text{bg}}$}
+            \STATE $\mathcal{F}_t \leftarrow \mathcal{F}_t \cup \{\mathbf{p}\}$
+        \ENDIF
+    \ENDFOR
+\ENDFOR
+\RETURN $\{\mathcal{F}_1, \ldots, \mathcal{F}_T\}$
+\end{algorithmic}
+\end{algorithm}
+
+
+% ---------- Algorithm 2: L-shape Fitting ----------
+\begin{algorithm}[H]
+\caption{L-shape Bounding Box Fitting}
+\label{alg:lshape}
+\begin{algorithmic}[1]
+\REQUIRE Point cloud $\mathcal{P} = \{\mathbf{p}_1, \ldots, \mathbf{p}_N\}$
+\ENSURE Center $\mathbf{c}$, extent $(l, w, h)$, orientation $\theta^*$
+\STATE Project points to XY plane: $\{\mathbf{p}_i^{xy}\}$
+\STATE $A_{\min} \leftarrow \infty$, $\theta^* \leftarrow 0$
+\FOR{$\theta = 0$ to $\pi$ step $\Delta\theta$}
+    \STATE Rotation matrix: $\mathbf{R}(\theta) = \begin{bmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{bmatrix}$
+    \FOR{$i = 1$ to $N$}
+        \STATE $\mathbf{p}_i'(\theta) \leftarrow \mathbf{R}(\theta) \mathbf{p}_i^{xy}$
+    \ENDFOR
+    \STATE Compute axis-aligned bounds: $x_{\min}, x_{\max}, y_{\min}, y_{\max}$
+    \STATE $l(\theta) \leftarrow x_{\max} - x_{\min}$
+    \STATE $w(\theta) \leftarrow y_{\max} - y_{\min}$
+    \STATE $A(\theta) \leftarrow l(\theta) \cdot w(\theta)$
+    \IF{$A(\theta) < A_{\min}$}
+        \STATE $A_{\min} \leftarrow A(\theta)$
+        \STATE $\theta^* \leftarrow \theta$
+    \ENDIF
+\ENDFOR
+\STATE Compute center in rotated frame and transform back
+\STATE $h \leftarrow \max_i p_{i,z} - \min_i p_{i,z}$
+\RETURN $\mathbf{c}, (l(\theta^*), w(\theta^*), h), \theta^*$
+\end{algorithmic}
+\end{algorithm}
+
+
+% ---------- Algorithm 3: Cross-Frame Association ----------
+\begin{algorithm}[H]
+\caption{Cross-Frame Vehicle Association}
+\label{alg:association}
+\begin{algorithmic}[1]
+\REQUIRE Observations $\{\mathcal{O}_1, \ldots, \mathcal{O}_N\}$ at frame $t$, active tracks $\{\mathcal{T}_1, \ldots, \mathcal{T}_M\}$
+\ENSURE Updated tracks
+\STATE Initialize cost matrix $\mathbf{C} \in \mathbb{R}^{M \times N}$
+\FOR{$i = 1$ to $M$}
+    \STATE Predict position: $\hat{\mathbf{c}}_t^i \leftarrow \mathbf{c}_{t-1}^i + \mathbf{v}_{t-1}^i \Delta t$
+    \STATE Estimate motion direction: $\mathbf{d}_i \leftarrow \text{PCA}(\text{trajectory}_i)$
+    \FOR{$j = 1$ to $N$}
+        \STATE $d_{\text{pos}} \leftarrow \|\hat{\mathbf{c}}_t^i - \mathbf{c}_t^j\|$
+        \STATE $\mathbf{d}_j^{\text{obs}} \leftarrow (\mathbf{c}_t^j - \mathbf{c}_{t-1}^i) / \|\mathbf{c}_t^j - \mathbf{c}_{t-1}^i\|$
+        \STATE $d_{\text{ang}} \leftarrow \arccos(\mathbf{d}_i \cdot \mathbf{d}_j^{\text{obs}}) / \pi$
+        \STATE $\mathbf{C}_{ij} \leftarrow d_{\text{pos}} + \lambda \cdot d_{\text{ang}}$
+    \ENDFOR
+\ENDFOR
+\STATE $(i^*, j^*) \leftarrow \text{HungarianAlgorithm}(\mathbf{C})$
+\STATE Update matched tracks with observations
+\STATE Create new tracks for unmatched observations
+\STATE Terminate tracks missing for $> \theta_{\text{miss}}$ frames
+\RETURN Updated track set
+\end{algorithmic}
+\end{algorithm}
+
+
+% ---------- Algorithm 4: Lane Division and Classification ----------
+\begin{algorithm}[H]
+\caption{Unsupervised Lane Division and Vehicle Classification}
+\label{alg:lane_classification}
+\begin{algorithmic}[1]
+\REQUIRE Vehicle trajectories $\{\mathcal{T}_1, \ldots, \mathcal{T}_K\}$, point clouds $\{\mathcal{P}_1, \ldots, \mathcal{P}_K\}$
+\ENSURE Lane assignments $\{\ell_1, \ldots, \ell_K\}$, vehicle types $\{v_1, \ldots, v_K\}$
+\STATE // Lane Division
+\FOR{$i = 1$ to $K$}
+    \STATE Extract lateral position: $y_i \leftarrow \text{median}(\{c_{\tau,y}^i\}_{\tau=T_i/3}^{2T_i/3})$
+\ENDFOR
+\STATE Cluster: $\{y_1, \ldots, y_K\} \xrightarrow{\text{DBSCAN}} \{\mathcal{L}_1, \ldots, \mathcal{L}_L\}$
+\FOR{each lane $\mathcal{L}_k$}
+    \STATE Compute centerline by spatial averaging
+\ENDFOR
+\STATE Assign each trajectory to nearest lane
+\STATE // Vehicle Classification
+\FOR{$i = 1$ to $K$}
+    \STATE Extract features: $\mathbf{f}_i \leftarrow \text{ExtractFeatures}(\mathcal{P}_i)$
+    \STATE Standardize: $\tilde{\mathbf{f}}_i \leftarrow (\mathbf{f}_i - \boldsymbol{\mu}) / \boldsymbol{\sigma}$
+    \STATE Classify: $v_i \leftarrow \text{SVM}.predict(\tilde{\mathbf{f}}_i)$
+\ENDFOR
+\RETURN Lane assignments, vehicle types
+\end{algorithmic}
+\end{algorithm}
+
+
+% ---------- Algorithm 5: Statistical Outlier Removal ----------
+\begin{algorithm}[H]
+\caption{Statistical Outlier Removal (SOR)}
+\label{alg:sor}
+\begin{algorithmic}[1]
+\REQUIRE Point cloud $\mathcal{P}$, number of neighbors $k$, std ratio $\alpha$
+\ENSURE Filtered point cloud $\mathcal{P}'$
+\FOR{each point $\mathbf{p}_i \in \mathcal{P}$}
+    \STATE Find $k$ nearest neighbors: $\{\mathbf{p}_{i,1}^{\text{nn}}, \ldots, \mathbf{p}_{i,k}^{\text{nn}}\}$
+    \STATE $\bar{d}_i \leftarrow \frac{1}{k} \sum_{j=1}^{k} \|\mathbf{p}_i - \mathbf{p}_{i,j}^{\text{nn}}\|$
+\ENDFOR
+\STATE $\mu \leftarrow \frac{1}{|\mathcal{P}|} \sum_i \bar{d}_i$
+\STATE $\sigma \leftarrow \sqrt{\frac{1}{|\mathcal{P}|} \sum_i (\bar{d}_i - \mu)^2}$
+\STATE $\mathcal{P}' \leftarrow \{\mathbf{p}_i \in \mathcal{P} \mid \bar{d}_i \leq \mu + \alpha \sigma\}$
+\RETURN $\mathcal{P}'$
+\end{algorithmic}
+\end{algorithm}
+
+
+% ---------- Feature Extraction Details ----------
+\begin{algorithm}[H]
+\caption{Vehicle Feature Extraction}
+\label{alg:feature_extraction}
+\begin{algorithmic}[1]
+\REQUIRE Point cloud $\mathcal{P}$, bounding box $(l, w, h)$
+\ENSURE Feature vector $\mathbf{f} \in \mathbb{R}^{11}$
+\STATE // Geometric features
+\STATE $V \leftarrow l \cdot w \cdot h$ \COMMENT{Volume}
+\STATE $r \leftarrow l / w$ \COMMENT{Aspect ratio}
+\STATE $\rho \leftarrow |\mathcal{P}| / V$ \COMMENT{Point density}
+\STATE // Centroid-based features
+\STATE $\mathbf{c} \leftarrow \frac{1}{|\mathcal{P}|} \sum_{\mathbf{p} \in \mathcal{P}} \mathbf{p}$
+\STATE $z_c \leftarrow c_z$ \COMMENT{Centroid height}
+\STATE $\bar{d} \leftarrow \frac{1}{|\mathcal{P}|} \sum_{\mathbf{p} \in \mathcal{P}} \|\mathbf{p} - \mathbf{c}\|$
+\STATE $\sigma_d \leftarrow \sqrt{\frac{1}{|\mathcal{P}|} \sum_{\mathbf{p} \in \mathcal{P}} (\|\mathbf{p} - \mathbf{c}\| - \bar{d})^2}$
+\STATE // Height distribution
+\STATE $\sigma_z \leftarrow \text{std}(\{p_z \mid \mathbf{p} \in \mathcal{P}\})$
+\STATE $\Delta z \leftarrow \max_{\mathbf{p} \in \mathcal{P}} p_z - \min_{\mathbf{p} \in \mathcal{P}} p_z$
+\STATE // Assemble feature vector
+\STATE $\mathbf{f} \leftarrow [l, w, h, V, r, \rho, z_c, \bar{d}, \sigma_d, \sigma_z, \Delta z]^T$
+\RETURN $\mathbf{f}$
+\end{algorithmic}
+\end{algorithm}
